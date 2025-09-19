@@ -208,9 +208,9 @@ camera_update :: proc(dt_f32: f32) {
 	// wheel → speed (still fine)
 	wheel := rl.GetMouseWheelMove()
 	if wheel != 0 {
-		c.base_speed *= (1.0 + wheel * 0.5)
+		c.base_speed *= (1.0 + wheel * 0.1)
 		if c.base_speed < 10000 {c.base_speed = 10000}
-		if c.base_speed > 5000000000 {c.base_speed = 5000000000}
+		if c.base_speed > 500000000000 {c.base_speed = 500000000000}
 	}
 
 	// f64 basis & movement

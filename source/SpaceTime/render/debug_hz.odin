@@ -76,11 +76,6 @@ draw_annulus_outline_xz :: proc(center: rl.Vector3, r0, r1: f32, segments: int, 
     }
 }
 
-// Convert meters→world units (your sim scale). Keep this as 1.0 if 1 unit = 1 m.
-meters_to_units :: proc(m: f64, meters_per_unit: f64) -> f32 {
-    return cast(f32)(m / meters_per_unit)
-}
-
 // Screen label helper (centered over band mid-radius).
 label_hz :: proc(cam: ^rl.Camera3D, world_pos: rl.Vector3, text: cstring, col: rl.Color) {
     // Is the point in front of the camera?

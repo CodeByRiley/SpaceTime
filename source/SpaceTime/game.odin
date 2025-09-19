@@ -40,7 +40,9 @@ earth_definition :: objects.ObjectDefinition {
 	density = 5514,
 	radius  = 6.371e6,
 }
-
+sun_vis   := render.VisualSizeParams{ min_px = 36, boost = 2.25, max_scale = 75 }
+earth_vis := render.VisualSizeParams{ min_px = 24,  boost = 1.75, max_scale = 60 }
+moon_vis  := render.VisualSizeParams{ min_px = 14,  boost = 1.5, max_scale = 55 }
 // Pointers to the bodies and a matching acceleration buffer. The arrays are
 // sized to 3 here; expand if you add more bodies.
 bodies: [3]^world.Body
@@ -214,9 +216,9 @@ draw :: proc() {
         proc(){
             // 3D
             render.with_cam3d(&render.w.state.cam, proc() {
-                render.draw_body(&sun)
-                render.draw_body(&moon)
-                render.draw_body(&earth)
+                render.draw_body_visual(&sun, sun_vis)
+				render.draw_body_visual(&moon, moon_vis)
+                render.draw_body_visual(&earth, earth_vis)
 				
 				render.show_object_distance(&render.w.state.cam, &sun, &earth, render.w.state.cam_in_world)
 				render.draw_habitable_zone_debug_world(
