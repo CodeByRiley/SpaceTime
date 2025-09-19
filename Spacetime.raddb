@@ -1,0 +1,21 @@
+// raddbg 0.9.21 project file
+
+recent_file: path: "source/SpaceTime/physics/physics.odin"
+recent_file: path: "C:/Odin/core/thread/thread.odin"
+recent_file: path: "C:/Odin/core/thread/thread_windows.odin"
+recent_file: path: "source/main.odin"
+recent_file: path: "source/SpaceTime/render/renderer.odin"
+recent_file: path: "source/SpaceTime/game.odin"
+recent_file: path: "source/SpaceTime/render/planet_renderer.odin"
+recent_file: path: "source/SpaceTime/world/config.odin"
+recent_file: path: "source/SpaceTime/world/world.odin"
+recent_file: path: "source/SpaceTime/sim.odin"
+recent_file: path: "source/SpaceTime/world"
+recent_file: path: "source/SpaceTime/objects"
+target:
+{
+  executable: "out/debug/SpaceTime.exe"
+  working_directory: "out/debug"
+  enabled: 1
+  debug_subprocesses: 1
+}

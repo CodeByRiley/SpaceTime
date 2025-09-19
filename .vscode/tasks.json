@@ -1,0 +1,59 @@
+{
+  "version": "2.0.0",
+  "presentation": { "reveal": "silent", "panel": "shared" },
+  "problemMatcher": {
+    "owner": "odin",
+    "source": "Odin",
+    "fileLocation": "absolute",
+    "pattern": {
+      "regexp": "^(.*?)(\\((\\d+):(\\d+)\\))\\s+(Syntax\\s+)?(Error|Warning):\\s+(.+)$",
+      "file": 1, "line": 3, "column": 4, "severity": 6, "message": 7
+    }
+  },
+  "tasks": [
+    {
+      "label": "Create build directory - Debug",
+      "type": "shell",
+      "windows": { "command": "cmd", "args": ["/C", "if not exist .\\out\\debug mkdir .\\out\\debug"] }
+    },
+    {
+      "label": "Create build directory - Release",
+      "type": "shell",
+      "windows": { "command": "cmd", "args": ["/C", "if not exist .\\out\\release mkdir .\\out\\release"] }
+    },
+    {
+      "label": "Build - Debug",
+      "group": "build",
+      "dependsOn": "Create build directory - Debug",
+      "type": "process",
+      "command": "C:/Odin/odin.exe",
+      "args": [
+        "build",
+        "${workspaceFolder}/source",
+        "-out:${workspaceFolder}/out/debug/${fileWorkspaceFolderBasename}.exe",
+        "-debug",
+        "-vet",
+        "-show-timings",
+        "-show-debug-messages"
+      ],
+      "options": { "cwd": "${workspaceFolder}" }
+    },
+    {
+      "label": "Build - Release",
+      "group": "build",
+      "dependsOn": "Create build directory - Release",
+      "type": "process",
+      "command": "C:/Odin/odin.exe",
+      "args": [
+        "build",
+        "${workspaceFolder}/source",
+        "-out:${workspaceFolder}/out/release/${fileWorkspaceFolderBasename}.exe",
+        "-o:speed",
+        "-vet",
+        "-show-timings",
+        "-show-debug-messages"
+      ],
+      "options": { "cwd": "${workspaceFolder}" }
+    }
+  ]
+}

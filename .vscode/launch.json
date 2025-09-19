@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch - Debug",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "preLaunchTask": "Build - Debug",
+      "program": "${workspaceFolder}/out/debug/${fileWorkspaceFolderBasename}.exe",
+      "cwd": "${workspaceFolder}/out/debug",
+      "environment": [
+        // If raylib.dll lives elsewhere, add its folder to PATH here:
+        // { "name": "PATH", "value": "C:\\path\\to\\raylib;${env:PATH}" }
+      ],
+      "console": "internalConsole",
+      "internalConsoleOptions": "openOnSessionStart"
+    },
+    {
+      "name": "Launch - Release",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "preLaunchTask": "Build - Release",
+      "program": "${workspaceFolder}/out/release/${fileWorkspaceFolderBasename}.exe",
+      "cwd": "${workspaceFolder}/out/release",
+      "console": "internalConsole",
+      "internalConsoleOptions": "openOnSessionStart"
+    }
+  ]
+}
