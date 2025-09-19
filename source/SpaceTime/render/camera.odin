@@ -22,6 +22,14 @@ Camera_Controller :: struct {
 	fov_step:      f32,
 }
 
+Follow_State :: struct {
+    active:     bool,
+    target:     ^world.Body,
+    distance_m: f64,    // current camera distance to keep the chosen angular size
+    angle_deg:  f32,    // desired apparent diameter of the body on screen
+    smooth_hz:  f32,    // how fast we converge to the goal (5–10 feels good)
+}
+
 v3_add :: proc(a, b: rl.Vector3) -> rl.Vector3 {return a + b}
 v3_sub :: proc(a, b: rl.Vector3) -> rl.Vector3 {return a - b}
 v3_scale :: proc(a: rl.Vector3, s: f32) -> rl.Vector3 {return a * s}
@@ -43,6 +51,29 @@ cam_ctrl_defaults :: proc() {
 	}
 }
 
+follow_start :: proc(b: ^world.Body, angle_deg: f32 = 30.0, smooth_hz: f32 = 6.0) {
+    if b == nil { return }
+    // distance so a sphere of radius r subtends angle_deg
+    angle := cast(f64)(angle_deg) * cast(f64)(rl.DEG2RAD)
+    dist  := b.def.radius / math.tan(angle*0.5)
+
+    w.state.follow = Follow_State{
+        active     = true,
+        target     = b,
+        distance_m = dist,
+        angle_deg  = angle_deg,
+        smooth_hz  = smooth_hz,
+    }
+}
+
+follow_stop :: proc() {
+    w.state.follow.active = false
+    w.state.follow.target = nil
+}
+
+focus_on_body :: proc(b: ^world.Body, angle_deg: f32) {
+    follow_start(b, angle_deg)
+}
 
 // cam_init_from_current synchronizes the controller's yaw and pitch angles based on
 // the camera's existing position and target vectors. This should be called once after
@@ -189,9 +220,8 @@ cam_set_invert_y :: proc(on: bool) {w.state.ctrl.invert_y = on}
 cam_wheel_affects_fov := false
 
 camera_update :: proc(dt_f32: f32) {
-	c := &w.state.ctrl
-
-	if rl.IsMouseButtonPressed(rl.MouseButton.RIGHT) do cam_toggle_cursor()
+    c := &w.state.ctrl
+    if rl.IsMouseButtonPressed(rl.MouseButton.RIGHT) do cam_toggle_cursor()
 
 	if c.cursor_locked {
 		dm := rl.GetMouseDelta()
@@ -205,59 +235,106 @@ camera_update :: proc(dt_f32: f32) {
 		}
 	}
 
-	// wheel → speed (still fine)
-	wheel := rl.GetMouseWheelMove()
-	if wheel != 0 {
-		c.base_speed *= (1.0 + wheel * 0.1)
-		if c.base_speed < 10000 {c.base_speed = 10000}
-		if c.base_speed > 500000000000 {c.base_speed = 500000000000}
+    dt := cast(f64)(dt_f32)
+
+    // Build f64 basis from current yaw/pitch (used by both modes)
+    fwd, right, up := basis64_from_yaw_pitch(c.yaw, c.pitch)
+
+    if w.state.follow.active && w.state.follow.target != nil {
+        // ---------- FOLLOW MODE ----------
+        // Keyboard orbit around target (keeps target centered)
+        rot_deg := 90.0 * dt_f32  // degrees per second
+        if rl.IsKeyDown(rl.KeyboardKey.A)            do c.yaw   -= rot_deg
+        if rl.IsKeyDown(rl.KeyboardKey.D)            do c.yaw   += rot_deg
+        if rl.IsKeyDown(rl.KeyboardKey.SPACE)        do c.pitch += rot_deg
+        if rl.IsKeyDown(rl.KeyboardKey.LEFT_CONTROL) do c.pitch -= rot_deg
+        if c.pitch < c.min_pitch { c.pitch = c.min_pitch }
+        if c.pitch > c.max_pitch { c.pitch = c.max_pitch }
+
+        // Recompute basis after yaw/pitch edits
+        fwd, right, up = basis64_from_yaw_pitch(c.yaw, c.pitch)
+
+        // Dolly with wheel (SHIFT = stronger); use IsKeyDown, keep floats
+        wheel := rl.GetMouseWheelMove()
+        if wheel != 0.0 {
+			step: f64 = 1.0 + 0.15
+			if(rl.IsKeyDown(.LEFT_SHIFT)) { step *= (1.0 + 2.0) } else { step *= (1.0 + 0.0) }
+            factor := math.pow(step, cast(f64)wheel)
+            w.state.follow.distance_m /= factor
+
+            min_d := w.state.follow.target.def.radius * 1.2
+            if w.state.follow.distance_m < min_d do w.state.follow.distance_m = min_d
+        }
+
+        // W/S dolly (continuous)
+        if rl.IsKeyDown(rl.KeyboardKey.W) do w.state.follow.distance_m *= math.max(0.0, 1.0 - 1.5*dt)
+        if rl.IsKeyDown(rl.KeyboardKey.S) do w.state.follow.distance_m *= (1.0 + 1.5*dt)
+
+        // Place camera at: target - fwd * distance (smooth to avoid jitter)
+        target := w.state.follow.target.world
+        goal := target
+        goal.local = helpers.v3d_add(goal.local, helpers.v3d_scale(fwd, -w.state.follow.distance_m))
+        world.normalize_world_pos(&goal)
+
+        k := cast(f64)(w.state.follow.smooth_hz)
+        alpha := 1.0 - math.exp(-k*dt)
+        off := world.delta(w.state.cam_in_world, goal)
+        w.state.cam_in_world.local = helpers.v3d_add(w.state.cam_in_world.local, helpers.v3d_scale(off, alpha))
+        world.normalize_world_pos(&w.state.cam_in_world)
+
+        // RL camera at origin, looking along fwd
+        w.state.cam.position = rl.Vector3{0,0,0}
+        w.state.cam.target   = rl.Vector3{cast(f32)fwd.x, cast(f32)fwd.y, cast(f32)fwd.z}
+
+    } else {
+        // ---------- FREE-FLY (unchanged) ----------
+        spd := cast(f64)(c.base_speed)
+        if rl.IsKeyDown(rl.KeyboardKey.LEFT_SHIFT) do spd *= cast(f64)(c.fast_mult)
+        if rl.IsKeyDown(rl.KeyboardKey.LEFT_ALT)   do spd *= cast(f64)(c.slow_mult)
+
+        vel := helpers.Vector3D{}
+        if rl.IsKeyDown(rl.KeyboardKey.W)            do vel = helpers.v3d_add(vel, fwd)
+        if rl.IsKeyDown(rl.KeyboardKey.S)            do vel = helpers.v3d_sub(vel, fwd)
+        if rl.IsKeyDown(rl.KeyboardKey.D)            do vel = helpers.v3d_add(vel, right)
+        if rl.IsKeyDown(rl.KeyboardKey.A)            do vel = helpers.v3d_sub(vel, right)
+        if rl.IsKeyDown(rl.KeyboardKey.SPACE)        do vel = helpers.v3d_add(vel, up)
+        if rl.IsKeyDown(rl.KeyboardKey.LEFT_CONTROL) do vel = helpers.v3d_sub(vel, up)
+
+        l := math.sqrt(vel.x*vel.x + vel.y*vel.y + vel.z*vel.z)
+        if l > 1e-9 {
+            vel = helpers.v3d_scale(vel, (spd * dt) / l)
+            w.state.cam_in_world.local = helpers.v3d_add(w.state.cam_in_world.local, vel)
+            world.normalize_world_pos(&w.state.cam_in_world)
+        }
+
+        w.state.cam.position = rl.Vector3{0,0,0}
+        w.state.cam.target   = rl.Vector3{cast(f32)fwd.x, cast(f32)fwd.y, cast(f32)fwd.z}
+    }
+
+	if w.state.follow.active {
+		if rl.IsKeyDown(rl.KeyboardKey.A) || rl.IsKeyDown(rl.KeyboardKey.D) ||
+		   rl.IsKeyDown(rl.KeyboardKey.SPACE) || rl.IsKeyDown(rl.KeyboardKey.LEFT_CONTROL) {
+			follow_stop()
+		}
 	}
-
-	// f64 basis & movement
-	fwd, right, up := basis64_from_yaw_pitch(c.yaw, c.pitch)
-
-	spd := cast(f64)(c.base_speed) // meters/sec
-	if rl.IsKeyDown(rl.KeyboardKey.LEFT_SHIFT) do spd *= cast(f64)(c.fast_mult)
-	if rl.IsKeyDown(rl.KeyboardKey.LEFT_ALT) do spd *= cast(f64)(c.slow_mult)
-
-	vel := helpers.Vector3D{} // direction
-	if rl.IsKeyDown(rl.KeyboardKey.W) do vel = helpers.v3d_add(vel, fwd)
-	if rl.IsKeyDown(rl.KeyboardKey.S) do vel = helpers.v3d_sub(vel, fwd)
-	if rl.IsKeyDown(rl.KeyboardKey.D) do vel = helpers.v3d_add(vel, right)
-	if rl.IsKeyDown(rl.KeyboardKey.A) do vel = helpers.v3d_sub(vel, right)
-	if rl.IsKeyDown(rl.KeyboardKey.SPACE) do vel = helpers.v3d_add(vel, up)
-	if rl.IsKeyDown(rl.KeyboardKey.LEFT_CONTROL) do vel = helpers.v3d_sub(vel, up)
-
-	// integrate in f64 world space
-	dt := cast(f64)(dt_f32)
-	l := math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z)
-	if l > 1e-9 {
-		vel = helpers.v3d_scale(vel, (spd * dt) / l) // normalize * speed * dt
-		w.state.cam_in_world.local = helpers.v3d_add(w.state.cam_in_world.local, vel)
-		world.normalize_world_pos(&w.state.cam_in_world)
-	}
-
-	// keep RL camera near origin; just point it with f32 forward
-	w.state.cam.position = rl.Vector3{0, 0, 0}
-	w.state.cam.target = rl.Vector3{cast(f32)fwd.x, cast(f32)fwd.y, cast(f32)fwd.z}
 }
 
-focus_on_body :: proc(b: ^world.Body, angle_deg: f32) {
-	c := &w.state.ctrl
+// focus_on_body :: proc(b: ^world.Body, angle_deg: f32) {
+// 	c := &w.state.ctrl
 
-	// basis in world (f64)
-	fwd, _, _ := basis64_from_yaw_pitch(c.yaw, c.pitch)
+// 	// basis in world (f64)
+// 	fwd, _, _ := basis64_from_yaw_pitch(c.yaw, c.pitch)
 
-	// distance so that sphere of radius r subtends `angle_deg`
-	r_m := b.def.radius
-	angle_rad := cast(f64)(angle_deg) * cast(f64)(rl.DEG2RAD)
-	dist_m := r_m / math.tan(angle_rad * 0.5)
+// 	// distance so that sphere of radius r subtends `angle_deg`
+// 	r_m := b.def.radius
+// 	angle_rad := cast(f64)(angle_deg) * cast(f64)(rl.DEG2RAD)
+// 	dist_m := r_m / math.tan(angle_rad * 0.5)
 
-	// target world pos
-	target := b.world
-	// place camera `dist_m` *behind* target along -fwd
-	offset := helpers.v3d_scale(fwd, -dist_m)
-	w.state.cam_in_world = target
-	w.state.cam_in_world.local = helpers.v3d_add(target.local, offset)
-	world.normalize_world_pos(&w.state.cam_in_world)
-}
+// 	// target world pos
+// 	target := b.world
+// 	// place camera `dist_m` *behind* target along -fwd
+// 	offset := helpers.v3d_scale(fwd, -dist_m)
+// 	w.state.cam_in_world = target
+// 	w.state.cam_in_world.local = helpers.v3d_add(target.local, offset)
+// 	world.normalize_world_pos(&w.state.cam_in_world)
+// }

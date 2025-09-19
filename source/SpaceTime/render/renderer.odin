@@ -32,6 +32,7 @@ State :: struct {
 	cam:          rl.Camera3D,       // current camera used by with_cam3d
 	ctrl:         Camera_Controller, // (reserved) camera controller state
 	cam_in_world: world.WorldPos,    // camera expressed in sector+local meters
+	follow: Follow_State,
 }
 
 // Immutable window basics + embedded state.
@@ -40,6 +41,7 @@ Window :: struct {
 	height: u16,
 	title:  cstr,
 	state:  State,
+	
 }
 
 window: Window

@@ -61,6 +61,16 @@ camera: rl.Camera3D = {
 	.PERSPECTIVE,
 }
 
+Physics_Stepper :: struct {
+    h: f64,            // fixed step, e.g. 600 s
+    acc: f64,          // time accumulator (seconds)
+    max_steps: int,    // safety cap per frame
+}
+
+following: ^world.Body
+
+physics_stepper := Physics_Stepper{ h = 600.0, acc = 0.0, max_steps = 2000 }
+
 run :: proc() {
 	// Spin up physics worker pool first so it's ready when the loop begins.
 	physics.mt_init(12)
@@ -85,6 +95,7 @@ run :: proc() {
 	// Seed camera state inside render module.
 	fmt.println("INFO: Creating renderer camera")
 	render.w.state.cam = camera
+	render.w.state.follow = {}
 	render.cam_attach_from_current()
 
 	// Create bodies in world space (sector+local meters). Earth at ~1 AU.
@@ -117,6 +128,7 @@ run :: proc() {
 	// Assign tangential velocities for near-circular orbits (Y up, XZ plane).
 	fmt.println("INFO: Creating physics pairs")
 	init_sun_earth_moon(&sun,&earth,&moon)
+	
 	physics.compute_accels_mt(bodies[:], acc_buf[:]) 
 	// Main loop: tick update, input, draw, until window/system requests close.
 	for !render.should_close() {
@@ -132,28 +144,57 @@ run :: proc() {
 }
 
 init_sun_earth_moon :: proc(sun, earth, moon: ^world.Body) {
-    // Choose a plane normal for both orbits (Z+ here).
-    up := helpers.Vector3D{0, 0, 1}
+    // Orbit plane normal: Y+ gives orbits in the XZ plane
+    up := helpers.Vector3D{0, 1, 0}
 
-    // 1) Sun–Earth circular pair around their mutual CM
-    //    (mostly changes Earth's v; Sun barely moves, but it's the correct split).
+    // --- positions already set at spawn: Sun at 0, Earth at 1 AU, Moon at Earth+384,400 km ---
+
+    // zero then build up velocities
+    sun.v   = {}
+    earth.v = {}
+    moon.v  = {}
+
+    // 1) Sun–Earth circular pair (sets Earth ≈ 29.78 km/s around Sun)
     physics.init_circular_pair(sun, earth, up, +1.0)
 
-    // 2) Earth–Moon circular pair around their mutual CM
-    //    (adds Moon’s ~1.022 km/s and tweaks Earth by ~mM/(mE+mM)).
+    // 2) Give Moon the parent's baseline translation first
+    moon.v = earth.v
+
+    // 3) Earth–Moon circular pair (adds ±1.022 km/s about their CM)
     physics.init_circular_pair(earth, moon, up, +1.0)
+
+    // prime accels after final positions/velocities are set
+    physics.compute_accels_mt(bodies[:], acc_buf[:])
 }
 
 // Camera helpers for quick focus and relative placement, plus time-scale hotkeys.
 handle_inputs :: proc() {
-	if rl.IsKeyPressed(rl.KeyboardKey.I) do render.focus_on_body(&sun, 20) // ~fills view
-	if rl.IsKeyPressed(rl.KeyboardKey.O) do render.focus_on_body(&earth, 30)
-	if rl.IsKeyPressed(rl.KeyboardKey.P) do render.focus_on_body(&moon, 40)
+	if rl.IsKeyPressed(.I) do render.focus_on_body(&sun, 20)
+	if rl.IsKeyPressed(.O) do render.focus_on_body(&earth, 30)
+	if rl.IsKeyPressed(.P) do render.focus_on_body(&moon, 40)
+	if rl.IsKeyPressed(.U) do render.follow_stop()
 	if (rl.IsKeyPressed(.V)) {
 		off_unit := 10.0
 		off_m := off_unit * world.METERS_PER_UNIT
 		render.cam_place_relative_to(earth.world, 0.0, 0.0, off_m)
 	}
+}
+
+// Call once after spawning bodies, BEFORE the first step
+prime_accels :: proc(bodies: []^world.Body, acc: []helpers.Vector3D) {
+    physics.compute_accels_mt(bodies, acc)
+}
+
+// Each frame:
+tick_physics :: proc(bodies: []^world.Body, acc: []helpers.Vector3D, frame_dt: f64, time_scale: f64) {
+    physics_stepper.acc += frame_dt * time_scale
+    steps := 0
+    for physics_stepper.acc >= physics_stepper.h {
+        physics.step_verlet_mt(bodies, acc, physics_stepper.h)
+        physics_stepper.acc -= physics_stepper.h
+        steps += 1
+        if steps >= physics_stepper.max_steps { break } // avoid death spiral on stalls
+    }
 }
 
 // Time-scale control: multiplicative stepping, numeric presets, and clamps to
