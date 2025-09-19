@@ -271,13 +271,9 @@ draw :: proc() {
 					with_fill = true,
 					segs = 256,
 				)
-
-
-                //draw_world_origin_grid()
             })
 
-            // UI (labels in 2D, no state headaches)
-			
+            // UI
 			center_units := world.world_to_render(sun.world, render.w.state.cam_in_world)
 			render.draw_habitable_zone_labels(&render.w.state.cam, center_units, sun.def.mass)
 			render.draw_distance_labels(&render.w.state.cam, &sun,&earth,render.w.state.cam_in_world)
@@ -286,7 +282,6 @@ draw :: proc() {
         },
     )
 }
-
 
 draw_time_hud :: proc(x, y: i32) {
 	time_scale_cstr := strings.clone_to_cstring(
@@ -307,12 +302,12 @@ draw_world_origin_grid :: proc() {
     }
     p := world.world_to_render(origin, render.w.state.cam_in_world) // -> rl.Vector3
 
-    // Keep rlgl happy: flush before changing matrices, and after restoring.
+    //  flush before just to keep rlgl happy
     rlgl.DrawRenderBatchActive()
 
     rlgl.PushMatrix()
     rlgl.Translatef(p.x, p.y, p.z)
-    rl.DrawGrid(20, 1) // Draws centered at true world origin (not camera)
+    rl.DrawGrid(20, 1) // Draws centered at true world origin
     rlgl.PopMatrix()
 
     rlgl.DrawRenderBatchActive()
@@ -324,22 +319,4 @@ to_render_v3 :: proc(wp: world.WorldPos, meters_per_unit: f64) -> rl.Vector3 {
         cast(f32)(wp.local.y / meters_per_unit),
         cast(f32)(wp.local.z / meters_per_unit),
     }
-}
-
-sanitize_for_2d_text :: proc() {
-    // Finish any pending 3D batch
-    rlgl.DrawRenderBatchActive()
-
-    // Raylib’s defaults for text/sprites
-    rlgl.ActiveTextureSlot(0)                     // GL_TEXTURE0
-    rlgl.SetTexture(0)                            // so the next draw can bind its own
-    rlgl.SetShader(rlgl.GetShaderIdDefault(), rlgl.GetShaderLocsDefault())   // default textured shader
-    rlgl.SetBlendMode(rlgl.BLEND_SRC_ALPHA)        // srcAlpha/oneMinusSrcAlpha
-    rlgl.DisableDepthTest()
-    rlgl.DisableDepthMask()                         // avoid Z-writing in 2D
-    rlgl.EnableBackfaceCulling()                  // raylib default
-    rlgl.Color4ub(255, 255, 255, 255)
-
-    // Start a clean batch for UI
-    rlgl.DrawRenderBatchActive()
 }
